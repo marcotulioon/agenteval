@@ -60,7 +60,7 @@ geolocalizar, buscar clima de cada uma, comparar e calcular.
 - [x] Fase 1 — Hello LLM ✅
 - [x] Fase 2 — Uma ferramenta + loop ✅
 - [x] Fase 3 — Multi-ferramenta ✅ (geocode + get_weather via Open-Meteo)
-- [ ] Fase 4 — Observabilidade
+- [x] Fase 4 — Observabilidade ✅ (tokens, latência, nº de chamadas por execução)
 - [ ] Fase 5 — Avaliação
 - [ ] Fase 6 — Testes + CI
 - [ ] Fase 7 — README + push

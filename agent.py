@@ -15,6 +15,7 @@ explicar o mecanismo. Rode com:  uv run python agent.py
 
 import os
 import time
+from dataclasses import dataclass
 
 from dotenv import load_dotenv
 from google import genai
@@ -22,6 +23,27 @@ from google.genai import types
 
 from config import MAX_ITERATIONS, MODEL
 from tools import SCHEMAS, TOOLS
+
+
+# --- Observabilidade (Fase 4) ----------------------------------------------
+# Um @dataclass é a forma idiomática de Python para uma "estrutura de dados":
+# você declara os CAMPOS e o tipo, e o Python gera __init__, __repr__, etc.
+# de graça. Aqui é só um pacote de números que descrevem UMA execução.
+@dataclass
+class Metricas:
+    tokens_entrada: int = 0        # tokens que MANDAMOS ao modelo (prompt)
+    tokens_saida: int = 0          # tokens que o modelo GEROU (resposta)
+    tokens_total: int = 0          # soma dos dois
+    chamadas_ao_modelo: int = 0    # nº de idas ao LLM (voltas do loop)
+    chamadas_de_ferramenta: int = 0  # nº de tools executadas
+    latencia_s: float = 0.0        # tempo total de parede, em segundos
+
+
+# O que executar_agente() devolve: a resposta final E as métricas juntas.
+@dataclass
+class Resultado:
+    resposta: str
+    metricas: Metricas
 
 load_dotenv()
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
@@ -60,13 +82,32 @@ def _chamar_modelo(contents):
             time.sleep(2 * (tentativa + 1))  # backoff: 2s, 4s
 
 
-def executar_agente(pergunta: str) -> str:
-    """Roda o loop agêntico para uma pergunta e devolve a resposta final."""
+def executar_agente(pergunta: str) -> Resultado:
+    """Roda o loop agêntico para uma pergunta e devolve resposta + métricas."""
     # O histórico começa com a mensagem do usuário.
     contents = [types.Content(role="user", parts=[types.Part(text=pergunta)])]
 
+    metricas = Metricas()
+    inicio = time.time()  # marca o tempo ANTES de começar (relógio de parede)
+
+    def _finalizar(texto: str) -> Resultado:
+        # Fecha a medição de tempo e empacota tudo. Como cada 'return' precisa
+        # gravar a latência, centralizamos aqui para não repetir a linha.
+        metricas.latencia_s = round(time.time() - inicio, 2)
+        return Resultado(resposta=texto, metricas=metricas)
+
     for iteracao in range(1, MAX_ITERATIONS + 1):
         resposta = _chamar_modelo(contents)
+        metricas.chamadas_ao_modelo += 1
+
+        # Toda resposta do Gemini traz usage_metadata com a contagem de tokens
+        # DAQUELA chamada. Como o loop chama o modelo várias vezes, ACUMULAMOS.
+        uso = resposta.usage_metadata
+        if uso:
+            metricas.tokens_entrada += uso.prompt_token_count or 0
+            metricas.tokens_saida += uso.candidates_token_count or 0
+            metricas.tokens_total += uso.total_token_count or 0
+
         parte_conteudo = resposta.candidates[0].content
 
         # O modelo pediu alguma ferramenta?
@@ -74,7 +115,7 @@ def executar_agente(pergunta: str) -> str:
 
         if not chamadas:
             # Sem pedido de ferramenta => é a resposta final.
-            return resposta.text
+            return _finalizar(resposta.text)
 
         # Guardamos no histórico o que o MODELO disse (o pedido de ferramenta).
         contents.append(parte_conteudo)
@@ -87,6 +128,7 @@ def executar_agente(pergunta: str) -> str:
             print(f"  [tool] modelo pediu: {nome}({args})")
             funcao = TOOLS[nome]
             resultado = funcao(**args)
+            metricas.chamadas_de_ferramenta += 1
             print(f"  [tool] resultado: {resultado}")
             partes_resultado.append(
                 types.Part.from_function_response(
@@ -97,7 +139,7 @@ def executar_agente(pergunta: str) -> str:
         # Devolvemos os resultados ao modelo (role 'tool') e o loop continua.
         contents.append(types.Content(role="tool", parts=partes_resultado))
 
-    return "[limite de iterações atingido sem resposta final]"
+    return _finalizar("[limite de iterações atingido sem resposta final]")
 
 
 if __name__ == "__main__":
@@ -108,7 +150,15 @@ if __name__ == "__main__":
     print("=" * 60)
     print(f"PERGUNTA: {pergunta}")
     print("-" * 60)
-    resposta = executar_agente(pergunta)
+    resultado = executar_agente(pergunta)
     print("-" * 60)
-    print(f"RESPOSTA FINAL: {resposta}")
+    print(f"RESPOSTA FINAL: {resultado.resposta}")
+    print("-" * 60)
+    m = resultado.metricas
+    print("MÉTRICAS:")
+    print(f"  latência ............. {m.latencia_s}s")
+    print(f"  tokens (total) ....... {m.tokens_total}  "
+          f"(entrada {m.tokens_entrada} / saída {m.tokens_saida})")
+    print(f"  chamadas ao modelo ... {m.chamadas_ao_modelo}")
+    print(f"  chamadas de ferramenta {m.chamadas_de_ferramenta}")
     print("=" * 60)
