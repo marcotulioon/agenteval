@@ -13,6 +13,8 @@ perfeita para aprender o mecanismo antes de adicionar APIs externas (Fase 3).
 import ast
 import operator
 
+import httpx
+
 # --- 1. A função real ------------------------------------------------------
 
 # Por que NÃO usar eval()? Porque eval() executa QUALQUER código Python —
@@ -75,9 +77,112 @@ CALCULATOR_SCHEMA = {
     },
 }
 
+# --- 3. Ferramentas de rede: geocode + get_weather (Fase 3) ----------------
+# Estas tocam APIs externas reais (Open-Meteo, gratuitas e SEM chave). Duas
+# lições de produção aqui:
+#   (a) Chamadas de rede FALHAM (timeout, 404, API fora). Capturamos o erro e
+#       devolvemos como DADO — nunca derrubamos o agente. O MODELO decide o
+#       que fazer com o erro (tentar de novo, pedir esclarecimento).
+#   (b) get_weather depende do resultado de geocode (precisa de lat/lon). O
+#       modelo tem que ENCADEAR as chamadas — é o raciocínio multi-passo real.
+
+_GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
+_WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
+_TIMEOUT = 10.0  # SEMPRE ponha timeout em chamada de rede; sem isto o agente trava.
+
+
+def geocode(city: str) -> dict:
+    """Converte o nome de uma cidade em latitude/longitude (Open-Meteo Geocoding)."""
+    try:
+        resp = httpx.get(
+            _GEOCODE_URL,
+            params={"name": city, "count": 1, "language": "pt", "format": "json"},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        dados = resp.json()
+    except Exception as e:
+        return {"erro": f"Falha ao geocodificar '{city}': {e}"}
+
+    resultados = dados.get("results")
+    if not resultados:
+        return {"erro": f"Cidade não encontrada: '{city}'"}
+
+    r = resultados[0]
+    return {
+        "cidade": r.get("name"),
+        "pais": r.get("country"),
+        "latitude": r.get("latitude"),
+        "longitude": r.get("longitude"),
+    }
+
+
+def get_weather(latitude: float, longitude: float) -> dict:
+    """Busca o clima atual para uma coordenada (Open-Meteo Forecast)."""
+    try:
+        resp = httpx.get(
+            _WEATHER_URL,
+            params={
+                "latitude": latitude,
+                "longitude": longitude,
+                "current": "temperature_2m,relative_humidity_2m,wind_speed_10m",
+            },
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        dados = resp.json()
+    except Exception as e:
+        return {"erro": f"Falha ao buscar clima ({latitude},{longitude}): {e}"}
+
+    atual = dados.get("current", {})
+    unidades = dados.get("current_units", {})
+    return {
+        "temperatura": atual.get("temperature_2m"),
+        "unidade_temp": unidades.get("temperature_2m", "°C"),
+        "umidade": atual.get("relative_humidity_2m"),
+        "vento": atual.get("wind_speed_10m"),
+    }
+
+
+GEOCODE_SCHEMA = {
+    "name": "geocode",
+    "description": (
+        "Converte o nome de uma cidade em coordenadas (latitude e longitude). "
+        "Use ANTES de get_weather, que exige coordenadas."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "city": {
+                "type": "string",
+                "description": "Nome da cidade, ex: 'São Paulo'.",
+            }
+        },
+        "required": ["city"],
+    },
+}
+
+GET_WEATHER_SCHEMA = {
+    "name": "get_weather",
+    "description": (
+        "Retorna o clima atual (temperatura em °C, umidade, vento) de uma "
+        "latitude/longitude. Obtenha as coordenadas com geocode primeiro."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "latitude": {"type": "number", "description": "Latitude da localização."},
+            "longitude": {"type": "number", "description": "Longitude da localização."},
+        },
+        "required": ["latitude", "longitude"],
+    },
+}
+
 # Mapa que liga o NOME (que o modelo devolve) à FUNÇÃO real (que executamos).
 TOOLS = {
     "calculator": calculator,
+    "geocode": geocode,
+    "get_weather": get_weather,
 }
 
-SCHEMAS = [CALCULATOR_SCHEMA]
+SCHEMAS = [CALCULATOR_SCHEMA, GEOCODE_SCHEMA, GET_WEATHER_SCHEMA]

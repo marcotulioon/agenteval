@@ -59,7 +59,7 @@ geolocalizar, buscar clima de cada uma, comparar e calcular.
 - [x] Fase 0 — Setup ✅ (repo: github.com/marcotulioon/agenteval)
 - [x] Fase 1 — Hello LLM ✅
 - [x] Fase 2 — Uma ferramenta + loop ✅
-- [ ] Fase 3 — Multi-ferramenta
+- [x] Fase 3 — Multi-ferramenta ✅ (geocode + get_weather via Open-Meteo)
 - [ ] Fase 4 — Observabilidade
 - [ ] Fase 5 — Avaliação
 - [ ] Fase 6 — Testes + CI

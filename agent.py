@@ -101,7 +101,10 @@ def executar_agente(pergunta: str) -> str:
 
 
 if __name__ == "__main__":
-    pergunta = "Quanto é 137 * 24 mais 89? E depois divida esse total por 7."
+    pergunta = (
+        "Das 3 maiores cidades do Brasil (São Paulo, Rio de Janeiro e Brasília), "
+        "qual está mais fria agora e quantos graus abaixo da mais quente ela está?"
+    )
     print("=" * 60)
     print(f"PERGUNTA: {pergunta}")
     print("-" * 60)
